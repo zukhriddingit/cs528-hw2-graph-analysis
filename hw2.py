@@ -64,7 +64,7 @@ def save_graph_checkpoint(path, bucket_name, prefix, graph, load_seconds,
 
 
 def load_graph(bucket_name, prefix="pages/", public_http=False,
-               checkpoint_path=None, checkpoint_every=500, progress=None):
+               checkpoint_path=None, checkpoint_every=100, progress=None):
     if checkpoint_path and not public_http:
         raise ValueError("Checkpointing requires --public-http.")
     if checkpoint_every <= 0:
