@@ -4,6 +4,8 @@ import argparse
 import re
 import statistics
 import time
+import urllib.error
+import urllib.request
 
 
 LINK_PATTERN = re.compile(r'HREF="(\d+)\.html"', re.IGNORECASE)
@@ -16,7 +18,19 @@ def get_storage_client():
         return storage.Client.create_anonymous_client()
 
 
-def load_graph(bucket_name, prefix="pages/"):
+def download_public_blob(blob):
+    """Read a public object with a fresh HTTP connection and bounded retries."""
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(blob.public_url, timeout=30) as response:
+                return response.read().decode("utf-8")
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if attempt == 4:
+                raise
+            time.sleep(min(2 ** attempt, 8))
+
+
+def load_graph(bucket_name, prefix="pages/", public_http=False):
     client = get_storage_client()
     graph = {}
     count = 0
@@ -28,7 +42,10 @@ def load_graph(bucket_name, prefix="pages/"):
         filename = blob.name.rsplit("/", 1)[-1]
         page_id = int(filename.removesuffix(".html"))
 
-        html = blob.download_as_text(encoding="utf-8")
+        if public_http:
+            html = download_public_blob(blob)
+        else:
+            html = blob.download_as_text(encoding="utf-8")
         links = [int(x) for x in LINK_PATTERN.findall(html)]
 
         graph[page_id] = links
@@ -241,6 +258,12 @@ def main():
         action="store_true"
     )
 
+    parser.add_argument(
+        "--public-http",
+        action="store_true",
+        help="Download public objects through fresh HTTPS connections."
+    )
+
     args = parser.parse_args()
 
     total_start = time.perf_counter()
@@ -249,7 +272,8 @@ def main():
 
     graph = load_graph(
         args.bucket,
-        args.prefix
+        args.prefix,
+        public_http=args.public_http
     )
 
     load_time = time.perf_counter() - start

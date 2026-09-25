@@ -27,6 +27,13 @@ Parameters:
 - `--bucket`: Cloud Storage bucket name; defaults to `cloud_hw2_bucket`.
 - `--prefix`: object-name prefix containing the HTML pages; defaults to `pages/`.
 - `--skip-closeness`: omit the most CPU-intensive graph calculation for a quick preliminary check. Do not use this flag for the complete assignment run.
+- `--public-http`: after listing the bucket through the Cloud Storage client, read each public object through a fresh HTTPS connection. This is a single-threaded alternative for Cloud Shell environments where the client's persistent HTTP connection times out. The graph calculations and output are identical.
+
+On Cloud Shell, if a default download times out, run the complete calculation with:
+
+```bash
+python3 hw2.py --bucket cloud_hw2_bucket --public-http
+```
 
 The program prints page and link counts, average/median/min/max/20th/40th/60th/80th percentiles of link degrees, the five highest PageRank pages, the best closeness page, and a timing summary for each stage. Times are wall-clock seconds measured by `time.perf_counter()`.
 
