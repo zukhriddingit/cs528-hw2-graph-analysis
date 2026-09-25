@@ -1,7 +1,11 @@
 import unittest
 from collections import deque
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from hw2 import pagerank, closeness_centrality
+from hw2 import pagerank, closeness_centrality, load_graph
 
 
 class TestPageRank(unittest.TestCase):
@@ -106,6 +110,49 @@ class TestClosenessCentrality(unittest.TestCase):
 
         self.assertEqual(best_node, 5)
         self.assertAlmostEqual(best_score, 5 / 12)
+
+
+class TestCheckpointResume(unittest.TestCase):
+
+    def test_resume_skips_saved_files_and_finishes_graph(self):
+        blobs = [SimpleNamespace(name=f"pages/{i}.html") for i in range(4)]
+        client = SimpleNamespace(list_blobs=lambda *args, **kwargs: blobs)
+        calls = []
+
+        def interrupt_after_checkpoint(blob):
+            calls.append(blob.name)
+            if blob.name == "pages/2.html":
+                raise RuntimeError("interrupted")
+            return '<a HREF="1.html">link</a>'
+
+        with TemporaryDirectory() as directory:
+            checkpoint = str(Path(directory) / "graph.pkl")
+            with patch("hw2.get_storage_client", return_value=client), patch(
+                "hw2.download_public_blob", side_effect=interrupt_after_checkpoint
+            ):
+                with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                    load_graph(
+                        "bucket", public_http=True, checkpoint_path=checkpoint,
+                        checkpoint_every=2
+                    )
+
+            self.assertTrue(Path(checkpoint).is_file())
+            calls.clear()
+            progress = {}
+            with patch("hw2.get_storage_client", return_value=client), patch(
+                "hw2.download_public_blob",
+                side_effect=lambda blob: calls.append(blob.name) or
+                '<a HREF="1.html">link</a>'
+            ):
+                graph = load_graph(
+                    "bucket", public_http=True, checkpoint_path=checkpoint,
+                    checkpoint_every=2, progress=progress
+                )
+
+            self.assertEqual(progress["resumed_files"], 2)
+            self.assertGreater(progress["load_seconds"], 0)
+            self.assertEqual(calls, ["pages/2.html", "pages/3.html"])
+            self.assertEqual(graph, {i: [1] for i in range(4)})
 
 
 if __name__ == "__main__":

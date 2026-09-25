@@ -28,12 +28,21 @@ Parameters:
 - `--prefix`: object-name prefix containing the HTML pages; defaults to `pages/`.
 - `--skip-closeness`: omit the most CPU-intensive graph calculation for a quick preliminary check. Do not use this flag for the complete assignment run.
 - `--public-http`: after listing the bucket through the Cloud Storage client, read each public object through a fresh HTTPS connection. This is a single-threaded alternative for Cloud Shell environments where the client's persistent HTTP connection times out. The graph calculations and output are identical.
+- `--checkpoint PATH`: with `--public-http`, atomically save the parsed graph every 500 new pages to `PATH` and automatically resume from it on the next run. Use a path in Cloud Shell's persistent home directory.
 
 On Cloud Shell, if a default download times out, run the complete calculation with:
 
 ```bash
 python3 hw2.py --bucket cloud_hw2_bucket --public-http
 ```
+
+For a long Cloud Shell run that may be interrupted, use this exact command. Run the **same command again** after reopening Cloud Shell; it skips pages already saved in the checkpoint:
+
+```bash
+python3 hw2.py --bucket cloud_hw2_bucket --public-http --checkpoint "$HOME/hw2-cloudshell-checkpoint.pkl"
+```
+
+The checkpoint remains in Cloud Shell's home directory and contains the parsed graph and cumulative successful graph-loading time. The timing summary labels the resumed loading and total times; it also reports the current invocation's wall time. Work performed after the last saved checkpoint in an interrupted session is excluded from the cumulative figure.
 
 The program prints page and link counts, average/median/min/max/20th/40th/60th/80th percentiles of link degrees, the five highest PageRank pages, the best closeness page, and a timing summary for each stage. Times are wall-clock seconds measured by `time.perf_counter()`.
 

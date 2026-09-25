@@ -1,8 +1,11 @@
 from google.cloud import storage
 from google.auth.exceptions import DefaultCredentialsError
 import argparse
+import os
+import pickle
 import re
 import statistics
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -30,10 +33,69 @@ def download_public_blob(blob):
             time.sleep(min(2 ** attempt, 8))
 
 
-def load_graph(bucket_name, prefix="pages/", public_http=False):
-    client = get_storage_client()
+def save_graph_checkpoint(path, bucket_name, prefix, graph, load_seconds,
+                          complete=False):
+    """Atomically save completed downloads and their cumulative load time."""
+    path = os.path.expanduser(path)
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    state = {
+        "version": 1,
+        "bucket": bucket_name,
+        "prefix": prefix,
+        "graph": graph,
+        "load_seconds": load_seconds,
+        "complete": complete,
+    }
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", prefix=".hw2-checkpoint-", suffix=".tmp",
+            dir=directory, delete=False
+        ) as handle:
+            temp_path = handle.name
+            pickle.dump(state, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def load_graph(bucket_name, prefix="pages/", public_http=False,
+               checkpoint_path=None, checkpoint_every=500, progress=None):
+    if checkpoint_path and not public_http:
+        raise ValueError("Checkpointing requires --public-http.")
+    if checkpoint_every <= 0:
+        raise ValueError("checkpoint_every must be positive.")
+
+    run_start = time.perf_counter()
+    prior_load_seconds = 0.0
     graph = {}
-    count = 0
+    complete = False
+    if checkpoint_path and os.path.exists(os.path.expanduser(checkpoint_path)):
+        with open(os.path.expanduser(checkpoint_path), "rb") as handle:
+            state = pickle.load(handle)
+        if (state.get("version") != 1 or state.get("bucket") != bucket_name
+                or state.get("prefix") != prefix):
+            raise ValueError("Checkpoint does not match this bucket/prefix.")
+        graph = state["graph"]
+        prior_load_seconds = state["load_seconds"]
+        complete = state.get("complete", False)
+        print(f"Resuming from checkpoint: {len(graph)} files loaded.")
+
+    resumed_files = len(graph)
+    if progress is not None:
+        progress["resumed_files"] = resumed_files
+
+    if complete:
+        if progress is not None:
+            progress["load_seconds"] = prior_load_seconds
+        return graph
+
+    client = get_storage_client()
+    new_files = 0
 
     for blob in client.list_blobs(bucket_name, prefix=prefix):
         if not blob.name.endswith(".html"):
@@ -41,6 +103,8 @@ def load_graph(bucket_name, prefix="pages/", public_http=False):
 
         filename = blob.name.rsplit("/", 1)[-1]
         page_id = int(filename.removesuffix(".html"))
+        if page_id in graph:
+            continue
 
         if public_http:
             html = download_public_blob(blob)
@@ -49,10 +113,26 @@ def load_graph(bucket_name, prefix="pages/", public_http=False):
         links = [int(x) for x in LINK_PATTERN.findall(html)]
 
         graph[page_id] = links
-        count += 1
+        new_files += 1
+        count = len(graph)
 
         if count % 500 == 0:
             print(f"Loaded {count} files...")
+
+        if checkpoint_path and new_files % checkpoint_every == 0:
+            save_graph_checkpoint(
+                checkpoint_path, bucket_name, prefix, graph,
+                prior_load_seconds + time.perf_counter() - run_start
+            )
+
+    if checkpoint_path:
+        load_seconds = prior_load_seconds + time.perf_counter() - run_start
+        save_graph_checkpoint(
+            checkpoint_path, bucket_name, prefix, graph, load_seconds,
+            complete=True
+        )
+        if progress is not None:
+            progress["load_seconds"] = load_seconds
 
     return graph
 
@@ -264,23 +344,45 @@ def main():
         help="Download public objects through fresh HTTPS connections."
     )
 
+    parser.add_argument(
+        "--checkpoint",
+        metavar="PATH",
+        help="Save and resume --public-http downloads at this file."
+    )
+
     args = parser.parse_args()
+    if args.checkpoint and not args.public_http:
+        parser.error("--checkpoint requires --public-http")
 
     total_start = time.perf_counter()
 
     start = time.perf_counter()
+    load_progress = {}
 
     graph = load_graph(
         args.bucket,
         args.prefix,
-        public_http=args.public_http
+        public_http=args.public_http,
+        checkpoint_path=args.checkpoint,
+        progress=load_progress
     )
 
-    load_time = time.perf_counter() - start
+    current_load_time = time.perf_counter() - start
+    load_time = load_progress.get("load_seconds", current_load_time)
 
     print(f"\nPages: {len(graph)}")
     print(f"Links: {sum(len(v) for v in graph.values())}")
-    print(f"Load time: {load_time:.3f} seconds")
+    if args.checkpoint:
+        print(
+            f"Load time: {load_time:.3f} seconds "
+            "(cumulative successful graph loading across sessions)"
+        )
+        print(
+            f"Resumed files: {load_progress['resumed_files']}; "
+            f"current session loading: {current_load_time:.3f} seconds"
+        )
+    else:
+        print(f"Load time: {load_time:.3f} seconds")
 
     if len(graph) != 12000:
         print("WARNING: Expected 12,000 pages.")
@@ -343,7 +445,11 @@ def main():
             f"{closeness_time:.3f} seconds"
         )
 
-    total_time = time.perf_counter() - total_start
+    current_total_time = time.perf_counter() - total_start
+    total_time = (
+        current_total_time - current_load_time + load_time
+        if args.checkpoint else current_total_time
+    )
 
     print("\n========== TIMING SUMMARY ==========")
     print(f"Graph loading:     {load_time:.3f} seconds")
@@ -354,6 +460,15 @@ def main():
         print(f"Closeness:         {closeness_time:.3f} seconds")
 
     print(f"Total runtime:     {total_time:.3f} seconds")
+    if args.checkpoint:
+        print(
+            "Timing note: graph loading and total runtime include saved "
+            "work from prior sessions; unfinished work after the last "
+            "checkpoint is excluded."
+        )
+        print(
+            f"Current invocation wall time: {current_total_time:.3f} seconds"
+        )
     print("====================================")
 
 
