@@ -30,7 +30,15 @@ Parameters:
 - `--public-http`: after listing the bucket through the Cloud Storage client, read each public object through a fresh HTTPS connection. This is a single-threaded alternative for Cloud Shell environments where the client's persistent HTTP connection times out. The graph calculations and output are identical.
 - `--checkpoint PATH`: with `--public-http`, atomically save the parsed graph every 100 new pages to `PATH` and automatically resume from it on the next run. Use a path in Cloud Shell's persistent home directory.
 
-On Cloud Shell, if a default download times out, run the complete calculation with:
+To open an interactive Cloud Shell session from your laptop terminal, use the instructor-recommended connection command:
+
+```bash
+gcloud cloud-shell ssh --authorize-session --ssh-flag="-o ServerAliveInterval=60"
+```
+
+At the resulting Cloud Shell prompt, enter the cloned repository and run the Python commands below. The `gcloud` command opens the remote shell; `hw2.py` executes inside Cloud Shell. The 60-second SSH keepalive helps sustain the connection during a long run, while the checkpoint allows recovery if it is interrupted.
+
+If a default download times out in Cloud Shell, run the complete calculation with:
 
 ```bash
 python3 hw2.py --bucket cloud_hw2_bucket --public-http
