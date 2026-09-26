@@ -1,6 +1,7 @@
 from google.cloud import storage
 from google.auth.exceptions import DefaultCredentialsError
 import argparse
+import json
 import os
 import pickle
 import re
@@ -8,7 +9,9 @@ import statistics
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from types import SimpleNamespace
 
 
 LINK_PATTERN = re.compile(r'HREF="(\d+)\.html"', re.IGNORECASE)
@@ -31,6 +34,45 @@ def download_public_blob(blob):
             if attempt == 4:
                 raise
             time.sleep(min(2 ** attempt, 8))
+
+
+def list_public_blobs(bucket_name, prefix):
+    """List a public bucket through fresh, compact JSON API requests."""
+    bucket = urllib.parse.quote(bucket_name, safe="")
+    endpoint = f"https://storage.googleapis.com/storage/v1/b/{bucket}/o"
+    page_token = None
+
+    while True:
+        params = {
+            "prefix": prefix,
+            "maxResults": 1000,
+            "fields": "items(name),nextPageToken",
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        url = endpoint + "?" + urllib.parse.urlencode(params)
+
+        for attempt in range(5):
+            try:
+                with urllib.request.urlopen(url, timeout=30) as response:
+                    page = json.load(response)
+                break
+            except (urllib.error.URLError, TimeoutError, ConnectionError):
+                if attempt == 4:
+                    raise
+                time.sleep(min(2 ** attempt, 8))
+
+        for item in page.get("items", []):
+            name = item["name"]
+            object_path = urllib.parse.quote(name, safe="/")
+            yield SimpleNamespace(
+                name=name,
+                public_url=f"https://storage.googleapis.com/{bucket}/{object_path}",
+            )
+
+        page_token = page.get("nextPageToken")
+        if not page_token:
+            return
 
 
 def save_graph_checkpoint(path, bucket_name, prefix, graph, load_seconds,
@@ -94,10 +136,11 @@ def load_graph(bucket_name, prefix="pages/", public_http=False,
             progress["load_seconds"] = prior_load_seconds
         return graph
 
-    client = get_storage_client()
+    blobs = (list_public_blobs(bucket_name, prefix) if public_http
+             else get_storage_client().list_blobs(bucket_name, prefix=prefix))
     new_files = 0
 
-    for blob in client.list_blobs(bucket_name, prefix=prefix):
+    for blob in blobs:
         if not blob.name.endswith(".html"):
             continue
 
@@ -341,7 +384,7 @@ def main():
     parser.add_argument(
         "--public-http",
         action="store_true",
-        help="Download public objects through fresh HTTPS connections."
+        help="List public objects through the JSON API and download over HTTPS."
     )
 
     parser.add_argument(

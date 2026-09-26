@@ -14,7 +14,7 @@ source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 ```
 
-The bucket is public for object reads. The program uses Application Default Credentials when available and falls back to an anonymous Cloud Storage client when they are absent. No graph package is required.
+The bucket is public for object reads. The default path uses Application Default Credentials when available and falls back to an anonymous Cloud Storage client when they are absent. The `--public-http` path lists and reads public objects without credentials. No graph package is required.
 
 ## Run
 
@@ -27,7 +27,7 @@ Parameters:
 - `--bucket`: Cloud Storage bucket name; defaults to `cloud_hw2_bucket`.
 - `--prefix`: object-name prefix containing the HTML pages; defaults to `pages/`.
 - `--skip-closeness`: omit the most CPU-intensive graph calculation for a quick preliminary check. Do not use this flag for the complete assignment run.
-- `--public-http`: after listing the bucket through the Cloud Storage client, read each public object through a fresh HTTPS connection. This is a single-threaded alternative for Cloud Shell environments where the client's persistent HTTP connection times out. The graph calculations and output are identical.
+- `--public-http`: list objects through the public Cloud Storage JSON API, then read each public object through a fresh HTTPS connection. This single-threaded path avoids the Cloud Storage client's persistent-connection read timeouts seen in Cloud Shell. The graph calculations and output are identical.
 - `--checkpoint PATH`: with `--public-http`, atomically save the parsed graph every 100 new pages to `PATH` and automatically resume from it on the next run. Use a path in Cloud Shell's persistent home directory.
 
 To open an interactive Cloud Shell session from your laptop terminal, use the instructor-recommended connection command:

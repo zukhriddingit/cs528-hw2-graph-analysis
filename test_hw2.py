@@ -116,7 +116,6 @@ class TestCheckpointResume(unittest.TestCase):
 
     def test_resume_skips_saved_files_and_finishes_graph(self):
         blobs = [SimpleNamespace(name=f"pages/{i}.html") for i in range(4)]
-        client = SimpleNamespace(list_blobs=lambda *args, **kwargs: blobs)
         calls = []
 
         def interrupt_after_checkpoint(blob):
@@ -127,7 +126,7 @@ class TestCheckpointResume(unittest.TestCase):
 
         with TemporaryDirectory() as directory:
             checkpoint = str(Path(directory) / "graph.pkl")
-            with patch("hw2.get_storage_client", return_value=client), patch(
+            with patch("hw2.list_public_blobs", return_value=blobs), patch(
                 "hw2.download_public_blob", side_effect=interrupt_after_checkpoint
             ):
                 with self.assertRaisesRegex(RuntimeError, "interrupted"):
@@ -139,7 +138,7 @@ class TestCheckpointResume(unittest.TestCase):
             self.assertTrue(Path(checkpoint).is_file())
             calls.clear()
             progress = {}
-            with patch("hw2.get_storage_client", return_value=client), patch(
+            with patch("hw2.list_public_blobs", return_value=blobs), patch(
                 "hw2.download_public_blob",
                 side_effect=lambda blob: calls.append(blob.name) or
                 '<a HREF="1.html">link</a>'
