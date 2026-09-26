@@ -6,7 +6,7 @@ The Google Cloud project is `quick-formula-457319-q3`. The bucket is located in 
 
 ## Install
 
-Python 3.9 or newer is required. In a fresh clone:
+Python 3.10 or newer is required. In a fresh clone:
 
 ```bash
 python3 -m venv .venv
